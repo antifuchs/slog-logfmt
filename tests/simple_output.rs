@@ -2,14 +2,50 @@ use slog::{debug, o, Drain, Error, Logger, Serializer, KV};
 use slog_logfmt::Logfmt;
 use std::fmt::Arguments;
 use std::io;
-use std::io::stdout;
+use std::io::Cursor;
+use std::str::from_utf8;
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Default)]
+struct LogCapture(Arc<Mutex<Cursor<Vec<u8>>>>);
+
+impl LogCapture {
+    fn snapshot_buf(&self) -> Vec<u8> {
+        let guard = self.0.lock().unwrap();
+        (*guard).get_ref().clone()
+    }
+
+    fn snapshot_str(&self) -> String {
+        let buf = self.snapshot_buf();
+        from_utf8(&buf).unwrap().to_string()
+    }
+}
+
+impl io::Write for LogCapture {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
+        let mut guard = self.0.lock().unwrap();
+        (*guard).write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), io::Error> {
+        let mut guard = self.0.lock().unwrap();
+        (*guard).flush()
+    }
+}
 
 #[test]
 fn write_stuff() {
-    let drain = Logfmt::new(stdout()).build().fuse();
+    let output = LogCapture::default();
+    let drain = Logfmt::new(output.clone()).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let logger = Logger::root(drain, o!("logger" => "tests"));
     debug!(logger, #"testing_tag", "hi there"; "foo" => "bar'baz\"");
+
+    drop(logger);
+    assert_eq!(
+        output.snapshot_str(),
+        "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar\\\'baz\\\"\"\n"
+    );
 }
 
 struct PrefixSerializer<W: io::Write> {
@@ -25,7 +61,8 @@ impl<W: io::Write> Serializer for PrefixSerializer<W> {
 
 #[test]
 fn prefixed_stuff() {
-    let drain = Logfmt::new(stdout())
+    let output = LogCapture::default();
+    let drain = Logfmt::new(output.clone())
         .set_prefix(move |mut io, rec| {
             write!(&mut io, "[")?;
             {
@@ -41,4 +78,7 @@ fn prefixed_stuff() {
     let drain = slog_async::Async::new(drain).build().fuse();
     let logger = Logger::root(drain, o!("logger" => "tests"));
     debug!(logger, #"tag", "hi there"; "foo" => "9029292");
+
+    drop(logger);
+    assert_eq!(output.snapshot_str(), "[9029292] logger=\"tests\"\n");
 }

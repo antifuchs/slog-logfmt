@@ -157,6 +157,7 @@ macro_rules! w(
             return Ok(())
         }
         $s.next_field()?;
+        // TODO: `Debug` is kinda right, but excessive. Try to not quote strings when we can.
         write!($s.io, "{}={:?}", $k, $v)?;
         Ok(())
     }};
