@@ -1,9 +1,37 @@
+//! `slog_logfmt` - a [`logfmt`](https://brandur.org/logfmt) formatter for slog.
+//!
+//! This crate exposes a `slog` drain that formats messages as logfmt.
+//!
+//! # Example
+//! ```rust
+//! use slog_logfmt::Logfmt;
+//! use slog::{debug, o, Drain, Logger};
+//! use std::io::stdout;
+//!
+//! let drain = Logfmt::new(stdout()).build().fuse();
+//! let drain = slog_async::Async::new(drain).build().fuse();
+//! let logger = Logger::root(drain, o!("logger" => "tests"));
+//! debug!(logger, #"tag", "hi there"; "foo" => "bar'baz\"");
+//! ```
+//!
+//! Writes:
+//! ```text
+//! logger="tests" msg="hi there" foo="bar\'baz\""
+//! ```
+//!
+
 use slog::{Error, Key, OwnedKVList, Record, Value, KV};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Arguments;
 use std::io;
 
+/// A drain & formatter for [logfmt](https://brandur.org/logfmt)-formatted messages.
+///
+/// # Format
+/// The default format looks like the somewhat-more-human-readable
+/// format in https://brandur.org/logfmt#human. You can customize it
+/// with the [`LogfmtBuilder`] method `set_prefix`.
 pub struct Logfmt<W: io::Write> {
     io: RefCell<W>,
     prefix: Option<fn(&mut dyn io::Write, &Record) -> slog::Result>,
@@ -21,6 +49,7 @@ impl<W: io::Write> Logfmt<W> {
     }
 }
 
+/// A constructor for a [`Logfmt`] drain.
 pub struct LogfmtBuilder<W: io::Write> {
     io: W,
     prefix: Option<fn(&mut dyn io::Write, &Record) -> slog::Result>,
@@ -28,6 +57,7 @@ pub struct LogfmtBuilder<W: io::Write> {
 }
 
 impl<W: io::Write> LogfmtBuilder<W> {
+    /// Constructs the drain.
     pub fn build(self) -> Logfmt<W> {
         Logfmt {
             io: RefCell::new(self.io),
@@ -36,11 +66,17 @@ impl<W: io::Write> LogfmtBuilder<W> {
         }
     }
 
+    /// Set a function that prints a (not necessarily
+    /// logfmt-formatted) prefix to the output stream.
     pub fn set_prefix(mut self, prefix: fn(&mut dyn io::Write, &Record) -> slog::Result) -> Self {
         self.prefix = Some(prefix);
         self
     }
 
+    /// A list of fields that should not be printed with the `Logfmt` formatter.
+    ///
+    /// These could be emitted with the `set_prefix` prefixer, or
+    /// could just be skipped altogether for different reasons.
     pub fn skip_fields(mut self, keys: impl IntoIterator<Item = Key>) -> Self {
         self.skip_fields = keys.into_iter().collect();
         self
