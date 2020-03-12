@@ -1,3 +1,4 @@
+#![allow(clippy::tabs_in_doc_comments)]
 //! `slog_logfmt` - a [`logfmt`](https://brandur.org/logfmt) formatter for slog.
 //!
 //! This crate exposes a `slog` drain that formats messages as logfmt.
@@ -21,6 +22,7 @@
 //!
 
 use slog::{o, Error, Key, OwnedKVList, Record, Value, KV};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Arguments;
@@ -87,7 +89,7 @@ impl<W: io::Write> LogfmtBuilder<W> {
 
     /// A list of fields that should not be printed with the `Logfmt` formatter.
     ///
-    /// These could be emitted with the `set_prefix` prefixer, or
+    /// These could be emitted with the `set_prefix` prefix closure, or
     /// could just be skipped altogether for different reasons.
     pub fn skip_fields(mut self, keys: impl IntoIterator<Item = Key>) -> Self {
         self.skip_fields = keys.into_iter().collect();
@@ -157,11 +159,31 @@ macro_rules! w(
             return Ok(())
         }
         $s.next_field()?;
-        // TODO: `Debug` is kinda right, but excessive. Try to not quote strings when we can.
-        write!($s.io, "{}={:?}", $k, $v)?;
+        write!($s.io, "{}={}", $k, $v)?;
         Ok(())
     }};
 );
+
+fn can_skip_quoting(ch: char) -> bool {
+    (ch >= 'a' && ch <= 'z')
+        || (ch >= 'A' && ch <= 'Z')
+        || (ch >= '0' && ch <= '9')
+        || ch == '-'
+        || ch == '.'
+        || ch == '_'
+        || ch == '/'
+        || ch == '@'
+        || ch == '^'
+        || ch == '+'
+}
+
+fn optionally_quote(input: &str, force: bool) -> Cow<str> {
+    if !force && input.chars().all(can_skip_quoting) {
+        input.into()
+    } else {
+        format!("{:?}", input).into()
+    }
+}
 
 impl<'a, W> slog::Serializer for LogfmtSerializer<'a, W>
 where
@@ -232,21 +254,20 @@ where
     }
 
     fn emit_str(&mut self, key: &'static str, val: &str) -> Result<(), Error> {
-        w!(self, key, val)
+        w!(self, key, optionally_quote(val, false))
     }
 
     fn emit_unit(&mut self, key: &'static str) -> Result<(), Error> {
-        w!(self, key, ())
+        w!(self, key, "()")
     }
 
     fn emit_none(&mut self, key: &'static str) -> Result<(), Error> {
-        let o: Option<()> = None;
-        w!(self, key, o)
+        w!(self, key, "None")
     }
 
     fn emit_arguments<'b>(&mut self, key: &'static str, val: &Arguments<'b>) -> Result<(), Error> {
         let val = format!("{}", val);
-        w!(self, key, val)
+        w!(self, key, optionally_quote(&val, false))
     }
 }
 

@@ -44,7 +44,7 @@ fn write_stuff() {
     drop(logger);
     assert_eq!(
         output.snapshot_str(),
-        "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar\\\'baz\\\"\"\n"
+        "DEBG | #testing_tag\thi there\tlogger=tests foo=\"bar\\\'baz\\\"\"\n"
     );
 }
 
@@ -80,5 +80,5 @@ fn prefixed_stuff() {
     debug!(logger, #"tag", "hi there"; "foo" => "9029292");
 
     drop(logger);
-    assert_eq!(output.snapshot_str(), "[9029292] logger=\"tests\"\n");
+    assert_eq!(output.snapshot_str(), "[9029292] logger=tests\n");
 }
