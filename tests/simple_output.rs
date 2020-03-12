@@ -9,7 +9,7 @@ fn write_stuff() {
     let drain = Logfmt::new(stdout()).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let logger = Logger::root(drain, o!("logger" => "tests"));
-    debug!(logger, #"tag", "hi there"; "foo" => "bar'baz\"");
+    debug!(logger, #"testing_tag", "hi there"; "foo" => "bar'baz\"");
 }
 
 struct PrefixSerializer<W: io::Write> {

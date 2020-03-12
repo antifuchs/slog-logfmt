@@ -16,11 +16,11 @@
 //!
 //! Writes:
 //! ```text
-//! logger="tests" msg="hi there" foo="bar\'baz\""
+//! DEBG | #tag	hi there	logger="tests" foo="bar\'baz\""
 //! ```
 //!
 
-use slog::{Error, Key, OwnedKVList, Record, Value, KV};
+use slog::{o, Error, Key, OwnedKVList, Record, Value, KV};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Arguments;
@@ -34,8 +34,11 @@ use std::io;
 /// with the [`LogfmtBuilder`] method `set_prefix`.
 pub struct Logfmt<W: io::Write> {
     io: RefCell<W>,
-    prefix: Option<fn(&mut dyn io::Write, &Record) -> slog::Result>,
+    prefix: fn(&mut dyn io::Write, &Record) -> slog::Result,
     skip_fields: HashSet<Key>,
+    print_level: bool,
+    print_msg: bool,
+    print_tag: bool,
 }
 
 impl<W: io::Write> Logfmt<W> {
@@ -45,6 +48,9 @@ impl<W: io::Write> Logfmt<W> {
             io,
             prefix: None,
             skip_fields: HashSet::new(),
+            print_level: false,
+            print_msg: false,
+            print_tag: false,
         }
     }
 }
@@ -54,6 +60,9 @@ pub struct LogfmtBuilder<W: io::Write> {
     io: W,
     prefix: Option<fn(&mut dyn io::Write, &Record) -> slog::Result>,
     skip_fields: HashSet<Key>,
+    print_msg: bool,
+    print_level: bool,
+    print_tag: bool,
 }
 
 impl<W: io::Write> LogfmtBuilder<W> {
@@ -61,8 +70,11 @@ impl<W: io::Write> LogfmtBuilder<W> {
     pub fn build(self) -> Logfmt<W> {
         Logfmt {
             io: RefCell::new(self.io),
-            prefix: self.prefix,
+            prefix: self.prefix.unwrap_or(default_prefix),
             skip_fields: self.skip_fields,
+            print_msg: self.print_msg,
+            print_level: self.print_level,
+            print_tag: self.print_tag,
         }
     }
 
@@ -81,6 +93,45 @@ impl<W: io::Write> LogfmtBuilder<W> {
         self.skip_fields = keys.into_iter().collect();
         self
     }
+
+    /// Choose whether to print the log message.
+    ///
+    /// The default prefix already prints it, so the default is to skip.
+    pub fn print_msg(mut self, print: bool) -> Self {
+        self.print_msg = print;
+        self
+    }
+
+    /// Choose whether to print the log level.
+    ///
+    /// The default prefix already prints it, so the default is to skip.
+    pub fn print_level(mut self, print: bool) -> Self {
+        self.print_level = print;
+        self
+    }
+
+    /// Choose whether to print the log level.
+    ///
+    /// The default prefix already prints it, so the default is to skip.
+    pub fn print_tag(mut self, print: bool) -> Self {
+        self.print_tag = print;
+        self
+    }
+}
+
+fn default_prefix(io: &mut dyn io::Write, rec: &Record) -> slog::Result {
+    let tag_prefix = if rec.tag() == "" { "" } else { "#" };
+    let tag_suffix = if rec.tag() == "" { "" } else { "\t" };
+    write!(
+        io,
+        "{level} | {tag_prefix}{tag}{tag_suffix}{msg}\t",
+        tag_prefix = tag_prefix,
+        tag = rec.tag(),
+        tag_suffix = tag_suffix,
+        level = rec.level().as_short_str(),
+        msg = rec.msg()
+    )?;
+    Ok(())
 }
 
 struct LogfmtSerializer<'a, W: io::Write> {
@@ -211,18 +262,26 @@ where
         logger_values: &OwnedKVList,
     ) -> Result<Self::Ok, Self::Err> {
         let mut io = self.io.borrow_mut();
-
-        if let Some(prefix) = self.prefix {
-            prefix(&mut *io, record)?;
-        }
+        let prefix = self.prefix;
+        prefix(&mut *io, record)?;
 
         let mut serializer = LogfmtSerializer {
             io: &mut *io,
             first: true,
             skip_fields: &self.skip_fields,
         };
+        if self.print_level {
+            let lvl = o!("level" => record.level().as_short_str());
+            lvl.serialize(record, &mut serializer)?;
+        }
+        if self.print_msg {
+            record.msg().serialize(record, "msg", &mut serializer)?;
+        }
+        if self.print_tag {
+            let tag = o!("level" => record.tag());
+            tag.serialize(record, &mut serializer)?;
+        }
         logger_values.serialize(record, &mut serializer)?;
-        record.msg().serialize(record, "msg", &mut serializer)?;
         record.kv().serialize(record, &mut serializer)?;
 
         io.write_all(b"\n")?;
