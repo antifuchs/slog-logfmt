@@ -28,14 +28,7 @@ use std::collections::HashSet;
 use std::fmt::Arguments;
 use std::io;
 
-/// A drain & formatter for [logfmt](https://brandur.org/logfmt)-formatted messages.
-///
-/// # Format
-/// The default format looks like the somewhat-more-human-readable
-/// format in https://brandur.org/logfmt#human. You can customize it
-/// with the [`LogfmtBuilder`] method `set_prefix`.
-pub struct Logfmt<W: io::Write> {
-    io: RefCell<W>,
+struct Options {
     prefix: fn(&mut dyn io::Write, &Record) -> slog::Result,
     skip_fields: HashSet<Key>,
     print_level: bool,
@@ -43,12 +36,10 @@ pub struct Logfmt<W: io::Write> {
     print_tag: bool,
 }
 
-impl<W: io::Write> Logfmt<W> {
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(io: W) -> LogfmtBuilder<W> {
-        LogfmtBuilder {
-            io,
-            prefix: None,
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            prefix: default_prefix,
             skip_fields: HashSet::new(),
             print_level: false,
             print_msg: false,
@@ -57,14 +48,31 @@ impl<W: io::Write> Logfmt<W> {
     }
 }
 
+/// A drain & formatter for [logfmt](https://brandur.org/logfmt)-formatted messages.
+///
+/// # Format
+/// The default format looks like the somewhat-more-human-readable
+/// format in https://brandur.org/logfmt#human. You can customize it
+/// with the [`LogfmtBuilder`] method `set_prefix`.
+pub struct Logfmt<W: io::Write> {
+    io: RefCell<W>,
+    options: Options,
+}
+
+impl<W: io::Write> Logfmt<W> {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(io: W) -> LogfmtBuilder<W> {
+        LogfmtBuilder {
+            io,
+            options: Default::default(),
+        }
+    }
+}
+
 /// A constructor for a [`Logfmt`] drain.
 pub struct LogfmtBuilder<W: io::Write> {
     io: W,
-    prefix: Option<fn(&mut dyn io::Write, &Record) -> slog::Result>,
-    skip_fields: HashSet<Key>,
-    print_msg: bool,
-    print_level: bool,
-    print_tag: bool,
+    options: Options,
 }
 
 impl<W: io::Write> LogfmtBuilder<W> {
@@ -72,18 +80,21 @@ impl<W: io::Write> LogfmtBuilder<W> {
     pub fn build(self) -> Logfmt<W> {
         Logfmt {
             io: RefCell::new(self.io),
-            prefix: self.prefix.unwrap_or(default_prefix),
-            skip_fields: self.skip_fields,
-            print_msg: self.print_msg,
-            print_level: self.print_level,
-            print_tag: self.print_tag,
+            options: self.options,
         }
     }
 
     /// Set a function that prints a (not necessarily
     /// logfmt-formatted) prefix to the output stream.
     pub fn set_prefix(mut self, prefix: fn(&mut dyn io::Write, &Record) -> slog::Result) -> Self {
-        self.prefix = Some(prefix);
+        self.options.prefix = prefix;
+        self
+    }
+
+    /// Sets the logger up to print no prefix, effectively starting the line entirely
+    /// logfmt field-formatted.
+    pub fn no_prefix(mut self) -> Self {
+        self.options.prefix = |_, _| Ok(());
         self
     }
 
@@ -92,7 +103,7 @@ impl<W: io::Write> LogfmtBuilder<W> {
     /// These could be emitted with the `set_prefix` prefix closure, or
     /// could just be skipped altogether for different reasons.
     pub fn skip_fields(mut self, keys: impl IntoIterator<Item = Key>) -> Self {
-        self.skip_fields = keys.into_iter().collect();
+        self.options.skip_fields = keys.into_iter().collect();
         self
     }
 
@@ -100,7 +111,7 @@ impl<W: io::Write> LogfmtBuilder<W> {
     ///
     /// The default prefix already prints it, so the default is to skip.
     pub fn print_msg(mut self, print: bool) -> Self {
-        self.print_msg = print;
+        self.options.print_msg = print;
         self
     }
 
@@ -108,7 +119,7 @@ impl<W: io::Write> LogfmtBuilder<W> {
     ///
     /// The default prefix already prints it, so the default is to skip.
     pub fn print_level(mut self, print: bool) -> Self {
-        self.print_level = print;
+        self.options.print_level = print;
         self
     }
 
@@ -116,7 +127,7 @@ impl<W: io::Write> LogfmtBuilder<W> {
     ///
     /// The default prefix already prints it, so the default is to skip.
     pub fn print_tag(mut self, print: bool) -> Self {
-        self.print_tag = print;
+        self.options.print_tag = print;
         self
     }
 }
@@ -284,22 +295,22 @@ where
         logger_values: &OwnedKVList,
     ) -> Result<Self::Ok, Self::Err> {
         let mut io = self.io.borrow_mut();
-        let prefix = self.prefix;
+        let prefix = self.options.prefix;
         prefix(&mut *io, record)?;
 
         let mut serializer = LogfmtSerializer {
             io: &mut *io,
             first: true,
-            skip_fields: &self.skip_fields,
+            skip_fields: &self.options.skip_fields,
         };
-        if self.print_level {
+        if self.options.print_level {
             let lvl = o!("level" => record.level().as_short_str());
             lvl.serialize(record, &mut serializer)?;
         }
-        if self.print_msg {
+        if self.options.print_msg {
             record.msg().serialize(record, "msg", &mut serializer)?;
         }
-        if self.print_tag {
+        if self.options.print_tag {
             let tag = o!("level" => record.tag());
             tag.serialize(record, &mut serializer)?;
         }
