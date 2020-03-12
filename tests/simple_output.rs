@@ -48,6 +48,21 @@ fn write_stuff() {
     );
 }
 
+#[test]
+fn force_quotes() {
+    let output = LogCapture::default();
+    let drain = Logfmt::new(output.clone()).force_quotes().build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = Logger::root(drain, o!("logger" => "tests"));
+    debug!(logger, #"testing_tag", "hi there"; "foo" => "bar'baz\"");
+
+    drop(logger);
+    assert_eq!(
+        output.snapshot_str(),
+        "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar\\\'baz\\\"\"\n"
+    );
+}
+
 struct PrefixSerializer<W: io::Write> {
     io: W,
 }

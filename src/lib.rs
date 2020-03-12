@@ -34,6 +34,7 @@ struct Options {
     print_level: bool,
     print_msg: bool,
     print_tag: bool,
+    force_quotes: bool,
 }
 
 impl Default for Options {
@@ -44,6 +45,7 @@ impl Default for Options {
             print_level: false,
             print_msg: false,
             print_tag: false,
+            force_quotes: false,
         }
     }
 }
@@ -130,6 +132,14 @@ impl<W: io::Write> LogfmtBuilder<W> {
         self.options.print_tag = print;
         self
     }
+
+    /// Force quoting field values even if they don't contain quotable characters.
+    ///
+    /// Setting this option will surround values with quotes like `foo="bar"`.
+    pub fn force_quotes(mut self) -> Self {
+        self.options.force_quotes = true;
+        self
+    }
 }
 
 fn default_prefix(io: &mut dyn io::Write, rec: &Record) -> slog::Result {
@@ -151,6 +161,7 @@ struct LogfmtSerializer<'a, W: io::Write> {
     io: &'a mut W,
     first: bool,
     skip_fields: &'a HashSet<Key>,
+    force_quotes: bool,
 }
 
 impl<'a, W: io::Write> LogfmtSerializer<'a, W> {
@@ -265,7 +276,7 @@ where
     }
 
     fn emit_str(&mut self, key: &'static str, val: &str) -> Result<(), Error> {
-        w!(self, key, optionally_quote(val, false))
+        w!(self, key, optionally_quote(val, self.force_quotes))
     }
 
     fn emit_unit(&mut self, key: &'static str) -> Result<(), Error> {
@@ -278,7 +289,7 @@ where
 
     fn emit_arguments<'b>(&mut self, key: &'static str, val: &Arguments<'b>) -> Result<(), Error> {
         let val = format!("{}", val);
-        w!(self, key, optionally_quote(&val, false))
+        w!(self, key, optionally_quote(&val, self.force_quotes))
     }
 }
 
@@ -302,6 +313,7 @@ where
             io: &mut *io,
             first: true,
             skip_fields: &self.options.skip_fields,
+            force_quotes: self.options.force_quotes,
         };
         if self.options.print_level {
             let lvl = o!("level" => record.level().as_short_str());
