@@ -8,6 +8,8 @@ repository = "https://github.com/antifuchs/slog-logfmt"
 readme = "README.md"
 description = "logfmt drain & format for slog"
 documentation = "https://docs.rs/slog-logfmt"
+categories = ["development-tools::debugging", "value-formatting", "command-line-interface"]
+keywords = ["slog", "logfmt", "log", "logging", "structured"]
 
 [badges]
 travis-ci = { repository = "antifuchs/slog-logfmt", branch = "master" }
