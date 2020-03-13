@@ -1,5 +1,5 @@
 use slog::{debug, o, Drain, Error, Logger, Serializer, KV};
-use slog_logfmt::Logfmt;
+use slog_logfmt::{Logfmt, Redaction};
 use std::fmt::Arguments;
 use std::io;
 use std::io::Cursor;
@@ -87,7 +87,6 @@ fn prefixed_stuff() {
             write!(&mut io, "] ")?;
             Ok(())
         })
-        .skip_fields(vec!["foo"])
         .build()
         .fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
@@ -95,5 +94,30 @@ fn prefixed_stuff() {
     debug!(logger, #"tag", "hi there"; "foo" => "9029292");
 
     drop(logger);
-    assert_eq!(output.snapshot_str(), "[9029292] logger=tests\n");
+    assert_eq!(
+        output.snapshot_str(),
+        "[9029292] logger=tests foo=9029292\n"
+    );
+}
+
+#[test]
+fn redactions() {
+    let output = LogCapture::default();
+    let drain = Logfmt::new(output.clone())
+        .redact(|&key| match key {
+            "foo" => Redaction::Skip,
+            "secret" => Redaction::Redact(|_val| format_args!("***")),
+            _ => Redaction::Plain,
+        })
+        .build()
+        .fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = Logger::root(drain, o!("logger" => "tests"));
+    debug!(logger, #"tag", "hi there"; "foo" => "9029292", "secret" => 900);
+
+    drop(logger);
+    assert_eq!(
+        output.snapshot_str(),
+        "DEBG | #tag\thi there\tlogger=tests secret=\"***\"\n"
+    );
 }

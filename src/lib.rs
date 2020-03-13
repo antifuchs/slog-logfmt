@@ -24,28 +24,39 @@
 use slog::{o, Error, Key, OwnedKVList, Record, Value, KV};
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::fmt::Arguments;
 use std::io;
 
+/// A decision on whether to print a key/value pair.
+pub enum Redaction {
+    /// Print the value as-is.
+    Plain,
+
+    /// Do not print the entry at all.
+    Skip,
+
+    /// Redact the value with the given function.
+    Redact(fn(&'_ dyn Value) -> Arguments),
+}
+
 struct Options {
     prefix: fn(&mut dyn io::Write, &Record) -> slog::Result,
-    skip_fields: HashSet<Key>,
     print_level: bool,
     print_msg: bool,
     print_tag: bool,
     force_quotes: bool,
+    redactor: fn(&Key) -> Redaction,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Options {
             prefix: default_prefix,
-            skip_fields: HashSet::new(),
             print_level: false,
             print_msg: false,
             print_tag: false,
             force_quotes: false,
+            redactor: |_| Redaction::Plain,
         }
     }
 }
@@ -100,12 +111,14 @@ impl<W: io::Write> LogfmtBuilder<W> {
         self
     }
 
-    /// A list of fields that should not be printed with the `Logfmt` formatter.
+    /// Sets a function that makes decisions on whether to log a field.
     ///
-    /// These could be emitted with the `set_prefix` prefix closure, or
-    /// could just be skipped altogether for different reasons.
-    pub fn skip_fields(mut self, keys: impl IntoIterator<Item = Key>) -> Self {
-        self.options.skip_fields = keys.into_iter().collect();
+    /// This function must return a [`Redaction`] result, which has
+    /// two variants at the moment: `Redact::Skip` to not log the
+    /// field, and `Redact::Plain` to log the field value in plain
+    /// text.
+    pub fn redact(mut self, redact: fn(&Key) -> Redaction) -> Self {
+        self.options.redactor = redact;
         self
     }
 
@@ -160,8 +173,8 @@ fn default_prefix(io: &mut dyn io::Write, rec: &Record) -> slog::Result {
 struct LogfmtSerializer<'a, W: io::Write> {
     io: &'a mut W,
     first: bool,
-    skip_fields: &'a HashSet<Key>,
     force_quotes: bool,
+    redactor: fn(&Key) -> Redaction,
 }
 
 impl<'a, W: io::Write> LogfmtSerializer<'a, W> {
@@ -177,12 +190,24 @@ impl<'a, W: io::Write> LogfmtSerializer<'a, W> {
 
 macro_rules! w(
     ($s:expr, $k:expr, $v:expr) => {{
-        if $s.skip_fields.contains(&$k) {
-            return Ok(())
+        use Redaction::*;
+
+        let redact = $s.redactor;
+        let val = $v;
+        match redact(&$k) {
+            Skip => {return Ok(());}
+            Plain => {
+                $s.next_field()?;
+                write!($s.io, "{}={}", $k, val)?;
+                Ok(())
+            },
+            Redact(redactor) => {
+                $s.next_field()?;
+                let val = format!("{}", redactor(&val));
+                write!($s.io, "{}={}", $k, optionally_quote(&val, $s.force_quotes))?;
+                Ok(())
+            }
         }
-        $s.next_field()?;
-        write!($s.io, "{}={}", $k, $v)?;
-        Ok(())
     }};
 );
 
@@ -211,85 +236,87 @@ impl<'a, W> slog::Serializer for LogfmtSerializer<'a, W>
 where
     W: io::Write,
 {
-    fn emit_usize(&mut self, key: &'static str, val: usize) -> Result<(), Error> {
+    fn emit_usize(&mut self, key: slog::Key, val: usize) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_isize(&mut self, key: &'static str, val: isize) -> Result<(), Error> {
+    fn emit_isize(&mut self, key: slog::Key, val: isize) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_bool(&mut self, key: &'static str, val: bool) -> Result<(), Error> {
+    fn emit_bool(&mut self, key: slog::Key, val: bool) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_char(&mut self, key: &'static str, val: char) -> Result<(), Error> {
+    fn emit_char(&mut self, key: slog::Key, val: char) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_u8(&mut self, key: &'static str, val: u8) -> Result<(), Error> {
+    fn emit_u8(&mut self, key: slog::Key, val: u8) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_i8(&mut self, key: &'static str, val: i8) -> Result<(), Error> {
+    fn emit_i8(&mut self, key: slog::Key, val: i8) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_u16(&mut self, key: &'static str, val: u16) -> Result<(), Error> {
+    fn emit_u16(&mut self, key: slog::Key, val: u16) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_i16(&mut self, key: &'static str, val: i16) -> Result<(), Error> {
+    fn emit_i16(&mut self, key: slog::Key, val: i16) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_u32(&mut self, key: &'static str, val: u32) -> Result<(), Error> {
+    fn emit_u32(&mut self, key: slog::Key, val: u32) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_i32(&mut self, key: &'static str, val: i32) -> Result<(), Error> {
+    fn emit_i32(&mut self, key: slog::Key, val: i32) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_f32(&mut self, key: &'static str, val: f32) -> Result<(), Error> {
+    fn emit_f32(&mut self, key: slog::Key, val: f32) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_u64(&mut self, key: &'static str, val: u64) -> Result<(), Error> {
+    fn emit_u64(&mut self, key: slog::Key, val: u64) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_i64(&mut self, key: &'static str, val: i64) -> Result<(), Error> {
+    fn emit_i64(&mut self, key: slog::Key, val: i64) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_f64(&mut self, key: &'static str, val: f64) -> Result<(), Error> {
+    fn emit_f64(&mut self, key: slog::Key, val: f64) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_u128(&mut self, key: &'static str, val: u128) -> Result<(), Error> {
+    fn emit_u128(&mut self, key: slog::Key, val: u128) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_i128(&mut self, key: &'static str, val: i128) -> Result<(), Error> {
+    fn emit_i128(&mut self, key: slog::Key, val: i128) -> Result<(), Error> {
         w!(self, key, val)
     }
 
-    fn emit_str(&mut self, key: &'static str, val: &str) -> Result<(), Error> {
-        w!(self, key, optionally_quote(val, self.force_quotes))
+    fn emit_str(&mut self, key: slog::Key, val: &str) -> Result<(), Error> {
+        let val = optionally_quote(val, self.force_quotes);
+        w!(self, key, &*val)
     }
 
-    fn emit_unit(&mut self, key: &'static str) -> Result<(), Error> {
+    fn emit_unit(&mut self, key: slog::Key) -> Result<(), Error> {
         w!(self, key, "()")
     }
 
-    fn emit_none(&mut self, key: &'static str) -> Result<(), Error> {
+    fn emit_none(&mut self, key: slog::Key) -> Result<(), Error> {
         w!(self, key, "None")
     }
 
-    fn emit_arguments<'b>(&mut self, key: &'static str, val: &Arguments<'b>) -> Result<(), Error> {
+    fn emit_arguments<'b>(&mut self, key: slog::Key, val: &Arguments<'b>) -> Result<(), Error> {
         let val = format!("{}", val);
-        w!(self, key, optionally_quote(&val, self.force_quotes))
+        let val = optionally_quote(&val, self.force_quotes);
+        w!(self, key, &*val)
     }
 }
 
@@ -312,15 +339,20 @@ where
         let mut serializer = LogfmtSerializer {
             io: &mut *io,
             first: true,
-            skip_fields: &self.options.skip_fields,
             force_quotes: self.options.force_quotes,
+            redactor: self.options.redactor,
         };
         if self.options.print_level {
             let lvl = o!("level" => record.level().as_short_str());
             lvl.serialize(record, &mut serializer)?;
         }
         if self.options.print_msg {
-            record.msg().serialize(record, "msg", &mut serializer)?;
+            record.msg().serialize(
+                record,
+                #[allow(clippy::identity_conversion)] // necessary for dynamic-keys
+                "msg".into(),
+                &mut serializer,
+            )?;
         }
         if self.options.print_tag {
             let tag = o!("level" => record.tag());
