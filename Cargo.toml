@@ -1,7 +1,7 @@
 [package]
 edition = '2018'
 name = "slog-logfmt"
-version = "0.1.0-dev"
+version = "0.1.0"
 authors = ["Andreas Fuchs <asf@boinkor.net>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/antifuchs/slog-logfmt"
