@@ -42,10 +42,16 @@ fn write_stuff() {
     debug!(logger, #"testing_tag", "hi there"; "foo" => "bar'baz\"");
 
     drop(logger);
-    assert_eq!(
-        output.snapshot_str(),
+
+    #[rustversion::before(1.52)]
+    fn expected() -> &'static str {
         "DEBG | #testing_tag\thi there\tlogger=tests foo=\"bar\\\'baz\\\"\"\n"
-    );
+    }
+    #[rustversion::since(1.52)]
+    fn expected() -> &'static str {
+        "DEBG | #testing_tag\thi there\tlogger=tests foo=\"bar'baz\\\"\"\n"
+    }
+    assert_eq!(output.snapshot_str(), expected());
 }
 
 #[test]
@@ -57,10 +63,17 @@ fn force_quotes() {
     debug!(logger, #"testing_tag", "hi there"; "foo" => "bar'baz\"");
 
     drop(logger);
-    assert_eq!(
-        output.snapshot_str(),
-        "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar\\\'baz\\\"\"\n"
-    );
+
+    #[rustversion::before(1.52)]
+    fn expected() -> &'static str {
+        "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar\\'baz\\\"\"\n"
+    }
+    #[rustversion::since(1.52)]
+    fn expected() -> &'static str {
+        "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar'baz\\\"\"\n"
+    }
+
+    assert_eq!(output.snapshot_str(), expected());
 }
 
 struct PrefixSerializer<W: io::Write> {
