@@ -212,9 +212,9 @@ macro_rules! w(
 );
 
 fn can_skip_quoting(ch: char) -> bool {
-    (ch >= 'a' && ch <= 'z')
-        || (ch >= 'A' && ch <= 'Z')
-        || (ch >= '0' && ch <= '9')
+    ('a'..='z').contains(&ch)
+        || ('A'..='Z').contains(&ch)
+        || ('0'..='9').contains(&ch)
         || ch == '-'
         || ch == '.'
         || ch == '_'
@@ -349,7 +349,7 @@ where
         if self.options.print_msg {
             record.msg().serialize(
                 record,
-                #[allow(clippy::identity_conversion)] // necessary for dynamic-keys
+                #[allow(clippy::useless_conversion)] // necessary for dynamic-keys
                 "msg".into(),
                 &mut serializer,
             )?;
