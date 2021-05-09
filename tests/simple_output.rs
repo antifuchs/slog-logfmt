@@ -86,7 +86,10 @@ fn force_quotes() {
             "spaces and quotes")]
 #[test_case(r#"/foo/bar/baz"#, r#"f="/foo/bar/baz""#;
             "pathname")]
-fn field_formatting_with_quoting(str_repr: &str, expected: &str) {
+#[test_case(2_i128, r#"f="2""#)]
+#[test_case(12_u64, r#"f="12""#)]
+#[test_case(12_i64, r#"f="12""#)]
+fn field_formatting_with_quoting(str_repr: impl slog::Value, expected: &str) {
     let output = LogCapture::default();
     let drain = Logfmt::new(output.clone())
         .force_quotes()
@@ -110,7 +113,10 @@ fn field_formatting_with_quoting(str_repr: &str, expected: &str) {
             "spaces and quotes")]
 #[test_case(r#"/foo/bar/baz"#, r#"f=/foo/bar/baz"#;
             "pathname")]
-fn field_formatting_without_quoting(str_repr: &str, expected: &str) {
+#[test_case(2_i128, r#"f=2"#)]
+#[test_case(12_u64, r#"f=12"#)]
+#[test_case(12_i64, r#"f=12"#)]
+fn field_formatting_without_quoting(str_repr: impl slog::Value, expected: &str) {
     let output = LogCapture::default();
     let drain = Logfmt::new(output.clone())
         .no_prefix()
