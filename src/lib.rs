@@ -198,7 +198,8 @@ macro_rules! w(
             Skip => {return Ok(());}
             Plain => {
                 $s.next_field()?;
-                write!($s.io, "{}={}", $k, val)?;
+                write!($s.io, "{}=", $k)?;
+                write!($s.io, "{}", optionally_quote(&format!("{}", &val), $s.force_quotes))?;
                 Ok(())
             },
             Redact(redactor) => {
@@ -228,7 +229,7 @@ fn optionally_quote(input: &str, force: bool) -> Cow<str> {
     if !force && input.chars().all(can_skip_quoting) {
         input.into()
     } else {
-        format!("{:?}", input).into()
+        format!("\"{}\"", input.escape_debug()).into()
     }
 }
 
@@ -301,8 +302,7 @@ where
     }
 
     fn emit_str(&mut self, key: slog::Key, val: &str) -> Result<(), Error> {
-        let val = optionally_quote(val, self.force_quotes);
-        w!(self, key, &*val)
+        w!(self, key, &val)
     }
 
     fn emit_unit(&mut self, key: slog::Key) -> Result<(), Error> {
@@ -315,7 +315,6 @@ where
 
     fn emit_arguments<'b>(&mut self, key: slog::Key, val: &Arguments<'b>) -> Result<(), Error> {
         let val = format!("{}", val);
-        let val = optionally_quote(&val, self.force_quotes);
         w!(self, key, &*val)
     }
 }

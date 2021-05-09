@@ -1,3 +1,4 @@
+use core::fmt;
 use slog::{debug, o, Drain, Error, Logger, Serializer, KV};
 use slog_logfmt::{Logfmt, Redaction};
 use std::fmt::Arguments;
@@ -5,6 +6,7 @@ use std::io;
 use std::io::Cursor;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex};
+use test_case::test_case;
 
 #[derive(Clone, Default)]
 struct LogCapture(Arc<Mutex<Cursor<Vec<u8>>>>);
@@ -33,25 +35,31 @@ impl io::Write for LogCapture {
     }
 }
 
+struct DebugRepr(char, usize);
+
+impl fmt::Debug for DebugRepr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for _ in 0..self.1 {
+            write!(f, "{}", self.0)?;
+        }
+        Ok(())
+    }
+}
+
 #[test]
 fn write_stuff() {
     let output = LogCapture::default();
     let drain = Logfmt::new(output.clone()).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let logger = Logger::root(drain, o!("logger" => "tests"));
-    debug!(logger, #"testing_tag", "hi there"; "foo" => "bar'baz\"");
+    debug!(logger, #"testing_tag", "hi there"; "backslashes" => ?DebugRepr('\\', 2), "single_quotes" => ?DebugRepr('\'', 2), "double_quotes" => ?DebugRepr('"', 3));
 
     drop(logger);
 
-    #[rustversion::before(1.52)]
-    fn expected() -> &'static str {
-        "DEBG | #testing_tag\thi there\tlogger=tests foo=\"bar\\\'baz\\\"\"\n"
-    }
-    #[rustversion::since(1.52)]
-    fn expected() -> &'static str {
-        "DEBG | #testing_tag\thi there\tlogger=tests foo=\"bar'baz\\\"\"\n"
-    }
-    assert_eq!(output.snapshot_str(), expected());
+    assert_eq!(
+        output.snapshot_str(),
+        "DEBG | #testing_tag\thi there\tlogger=tests double_quotes=\"\\\"\\\"\\\"\" single_quotes=\"\\\'\\\'\" backslashes=\"\\\\\\\\\"\n"
+    );
 }
 
 #[test]
@@ -64,16 +72,63 @@ fn force_quotes() {
 
     drop(logger);
 
-    #[rustversion::before(1.52)]
-    fn expected() -> &'static str {
+    assert_eq!(
+        output.snapshot_str(),
         "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar\\'baz\\\"\"\n"
-    }
-    #[rustversion::since(1.52)]
-    fn expected() -> &'static str {
-        "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar'baz\\\"\"\n"
-    }
+    );
+}
 
-    assert_eq!(output.snapshot_str(), expected());
+#[test_case(r#"foo"#, r#"f="foo""#;
+            "a plain string")]
+#[test_case(r#"hi="there""#, r#"f="hi=\"there\"""#;
+            "something that looks like a field")]
+#[test_case(r#" "hi" "#, r#"f=" \"hi\" ""#;
+            "spaces and quotes")]
+#[test_case(r#"/foo/bar/baz"#, r#"f="/foo/bar/baz""#;
+            "pathname")]
+#[test_case(2_i128, r#"f="2""#)]
+#[test_case(12_u64, r#"f="12""#)]
+#[test_case(12_i64, r#"f="12""#)]
+fn field_formatting_with_quoting(str_repr: impl slog::Value, expected: &str) {
+    let output = LogCapture::default();
+    let drain = Logfmt::new(output.clone())
+        .force_quotes()
+        .no_prefix()
+        .print_level(false)
+        .build()
+        .fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = Logger::root(drain, o!());
+
+    debug!(logger, ""; "f" => str_repr);
+    drop(logger);
+    assert_eq!(output.snapshot_str().trim_end(), expected);
+}
+
+#[test_case(r#"foo"#, r#"f=foo"#;
+            "a plain string")]
+#[test_case(r#"hi="there""#, r#"f="hi=\"there\"""#;
+            "something that looks like a field")]
+#[test_case(r#" "hi" "#, r#"f=" \"hi\" ""#;
+            "spaces and quotes")]
+#[test_case(r#"/foo/bar/baz"#, r#"f=/foo/bar/baz"#;
+            "pathname")]
+#[test_case(2_i128, r#"f=2"#)]
+#[test_case(12_u64, r#"f=12"#)]
+#[test_case(12_i64, r#"f=12"#)]
+fn field_formatting_without_quoting(str_repr: impl slog::Value, expected: &str) {
+    let output = LogCapture::default();
+    let drain = Logfmt::new(output.clone())
+        .no_prefix()
+        .print_level(false)
+        .build()
+        .fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = Logger::root(drain, o!());
+
+    debug!(logger, ""; "f" => str_repr);
+    drop(logger);
+    assert_eq!(output.snapshot_str().trim_end(), expected);
 }
 
 struct PrefixSerializer<W: io::Write> {
