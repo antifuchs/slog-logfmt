@@ -6,6 +6,7 @@ use std::io;
 use std::io::Cursor;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex};
+use test_case::test_case;
 
 #[derive(Clone, Default)]
 struct LogCapture(Arc<Mutex<Cursor<Vec<u8>>>>);
@@ -75,6 +76,53 @@ fn force_quotes() {
         output.snapshot_str(),
         "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar\\'baz\\\"\"\n"
     );
+}
+
+#[test_case(r#"foo"#, r#"f="foo""#;
+            "a plain string")]
+#[test_case(r#"hi="there""#, r#"f="hi=\"there\"""#;
+            "something that looks like a field")]
+#[test_case(r#" "hi" "#, r#"f=" \"hi\" ""#;
+            "spaces and quotes")]
+#[test_case(r#"/foo/bar/baz"#, r#"f="/foo/bar/baz""#;
+            "pathname")]
+fn field_formatting_with_quoting(str_repr: &str, expected: &str) {
+    let output = LogCapture::default();
+    let drain = Logfmt::new(output.clone())
+        .force_quotes()
+        .no_prefix()
+        .print_level(false)
+        .build()
+        .fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = Logger::root(drain, o!());
+
+    debug!(logger, ""; "f" => str_repr);
+    drop(logger);
+    assert_eq!(output.snapshot_str().trim_end(), expected);
+}
+
+#[test_case(r#"foo"#, r#"f=foo"#;
+            "a plain string")]
+#[test_case(r#"hi="there""#, r#"f="hi=\"there\"""#;
+            "something that looks like a field")]
+#[test_case(r#" "hi" "#, r#"f=" \"hi\" ""#;
+            "spaces and quotes")]
+#[test_case(r#"/foo/bar/baz"#, r#"f=/foo/bar/baz"#;
+            "pathname")]
+fn field_formatting_without_quoting(str_repr: &str, expected: &str) {
+    let output = LogCapture::default();
+    let drain = Logfmt::new(output.clone())
+        .no_prefix()
+        .print_level(false)
+        .build()
+        .fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = Logger::root(drain, o!());
+
+    debug!(logger, ""; "f" => str_repr);
+    drop(logger);
+    assert_eq!(output.snapshot_str().trim_end(), expected);
 }
 
 struct PrefixSerializer<W: io::Write> {
