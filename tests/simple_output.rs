@@ -1,3 +1,4 @@
+use core::fmt;
 use slog::{debug, o, Drain, Error, Logger, Serializer, KV};
 use slog_logfmt::{Logfmt, Redaction};
 use std::fmt::Arguments;
@@ -33,25 +34,31 @@ impl io::Write for LogCapture {
     }
 }
 
+struct DebugRepr(char, usize);
+
+impl fmt::Debug for DebugRepr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for _ in 0..self.1 {
+            write!(f, "{}", self.0)?;
+        }
+        Ok(())
+    }
+}
+
 #[test]
 fn write_stuff() {
     let output = LogCapture::default();
     let drain = Logfmt::new(output.clone()).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let logger = Logger::root(drain, o!("logger" => "tests"));
-    debug!(logger, #"testing_tag", "hi there"; "foo" => "bar'baz\"");
+    debug!(logger, #"testing_tag", "hi there"; "backslashes" => ?DebugRepr('\\', 2), "single_quotes" => ?DebugRepr('\'', 2), "double_quotes" => ?DebugRepr('"', 3));
 
     drop(logger);
 
-    #[rustversion::before(1.52)]
-    fn expected() -> &'static str {
-        "DEBG | #testing_tag\thi there\tlogger=tests foo=\"bar\\\'baz\\\"\"\n"
-    }
-    #[rustversion::since(1.52)]
-    fn expected() -> &'static str {
-        "DEBG | #testing_tag\thi there\tlogger=tests foo=\"bar'baz\\\"\"\n"
-    }
-    assert_eq!(output.snapshot_str(), expected());
+    assert_eq!(
+        output.snapshot_str(),
+        "DEBG | #testing_tag\thi there\tlogger=tests double_quotes=\"\\\"\\\"\\\"\" single_quotes=\"\\\'\\\'\" backslashes=\"\\\\\\\\\"\n"
+    );
 }
 
 #[test]
@@ -64,16 +71,10 @@ fn force_quotes() {
 
     drop(logger);
 
-    #[rustversion::before(1.52)]
-    fn expected() -> &'static str {
+    assert_eq!(
+        output.snapshot_str(),
         "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar\\'baz\\\"\"\n"
-    }
-    #[rustversion::since(1.52)]
-    fn expected() -> &'static str {
-        "DEBG | #testing_tag\thi there\tlogger=\"tests\" foo=\"bar'baz\\\"\"\n"
-    }
-
-    assert_eq!(output.snapshot_str(), expected());
+    );
 }
 
 struct PrefixSerializer<W: io::Write> {

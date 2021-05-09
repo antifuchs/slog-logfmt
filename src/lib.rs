@@ -228,7 +228,7 @@ fn optionally_quote(input: &str, force: bool) -> Cow<str> {
     if !force && input.chars().all(can_skip_quoting) {
         input.into()
     } else {
-        format!("{:?}", input).into()
+        format!("\"{}\"", input.escape_debug()).into()
     }
 }
 
